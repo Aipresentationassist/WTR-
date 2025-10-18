@@ -1,0 +1,70 @@
+# WebTorrent App - Context and Progress
+
+## 2025-05-30 - Major Fixes and Improvements
+
+### Fixed Issues
+1. **Non-functional Download Buttons**
+   - Added missing `startDownload` method to handle button clicks
+   - Implemented proper magnet link validation
+   - Added user feedback for invalid inputs
+
+2. **WebSocket Communication**
+   - Fixed "Unknown Message Type" errors
+   - Resolved message parsing issues
+   - Added proper error handling for malformed messages
+
+3. **Connection Handling**
+   - Implemented automatic reconnection with exponential backoff
+   - Added ping/pong mechanism for connection health monitoring
+   - Fixed issues with multiple concurrent reconnection attempts
+
+### Working Features
+1. **Core Functionality**
+   - ✓ Starting downloads via magnet links
+   - ✓ Tracking download progress
+   - ✓ Displaying active downloads
+   - ✓ Showing downloaded files
+   - ✓ Handling multiple simultaneous downloads
+
+2. **WebSocket Communication**
+   - ✓ Real-time updates for download progress
+   - ✓ Automatic reconnection on network issues
+   - ✓ Proper cleanup of resources on disconnect
+
+3. **User Interface**
+   - ✓ Responsive feedback for user actions
+   - ✓ Clear error messages
+   - ✓ Download progress visualization
+
+### Technical Implementation
+1. **WebSocket Server**
+   - Robust message handling
+   - Connection state management
+   - Error recovery mechanisms
+
+2. **Client-Side**
+   - Event-driven architecture
+   - Proper state management
+   - Comprehensive error handling
+
+## Important Notes for Future Development
+1. **Code Structure**
+   - All WebSocket communication follows the message format: `{ type: string, ...payload }`
+   - Error handling is centralized for consistency
+   - Logging is implemented for debugging purposes
+
+2. **Dependencies**
+   - WebSocket for real-time communication
+   - WebTorrent for torrent handling
+   - Express for the web server
+
+3. **Known Limitations**
+   - Large numbers of simultaneous downloads may impact performance
+   - No built-in download queue (can be added if needed)
+   - Basic error recovery (can be enhanced)
+
+## Recent Working Changes (Preserve These)
+- WebSocket message structure and handling
+- Download initialization and tracking
+- Connection management and recovery
+- User interface updates for download status

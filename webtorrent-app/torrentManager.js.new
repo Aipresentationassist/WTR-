@@ -1,0 +1,356 @@
+import { spawn, execSync } from 'child_process';
+import path from 'path';
+import fs from 'fs';
+import os from 'os';
+import { fileURLToPath } from 'url';
+import crypto from 'crypto';
+
+// Get current directory in ES module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+class TorrentManager {
+    constructor() {
+        this.activeTorrents = new Map(); // torrentId -> { process, status, startTime }
+        this.isWindows = os.platform() === 'win32';
+        this.webtorrentPath = this.isWindows ? 'webtorrent' : 'webtorrent';
+        this.onUpdate = null; // Callback for updates
+        console.log(`[TORRENT] Using WebTorrent CLI: ${this.webtorrentPath}`);
+    }
+
+    async startTorrent(magnetUri, downloadPath, fresh = false) {
+        const torrentId = this.generateTorrentId();
+        
+        try {
+            console.log(`[TORRENT] Starting: ${magnetUri.substring(0, 50)}...`);
+            
+            // Ensure directory exists
+            if (!fs.existsSync(downloadPath)) {
+                fs.mkdirSync(downloadPath, { recursive: true });
+            }
+
+            // Create proper status object structure
+            const initialStatus = {
+                torrentId,
+                status: 'starting',
+                progress: 0,
+                downloadSpeed: 0,
+                uploadSpeed: 0,
+                peers: 0,
+                downloaded: 0,
+                totalSize: 0,
+                timeRemaining: 'Unknown',
+                fileName: 'Unknown',
+                streamingUrl: null,
+                canStream: false,
+                downloadDir: downloadPath,
+                fresh,
+                startTime: Date.now(),
+                error: null
+            };
+
+            // Store with proper structure
+            const processInfo = {
+                process: null, // Will be set after spawn
+                status: initialStatus, // This must be an object, not a string
+                startTime: Date.now()
+            };
+
+            this.activeTorrents.set(torrentId, processInfo);
+
+            // Spawn process
+            const spawnOptions = {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: { ...process.env }
+            };
+
+            if (this.isWindows) {
+                spawnOptions.shell = true;
+            }
+
+            const torrentProcess = spawn(this.webtorrentPath, [
+                'download',
+                magnetUri,
+                '--out', downloadPath,
+                '--verbose',
+                '--keep-seeding'
+            ], spawnOptions);
+
+            if (!torrentProcess.pid) {
+                throw new Error('Failed to spawn WebTorrent CLI process');
+            }
+
+            console.log(`[TORRENT ${torrentId}] Process started with PID: ${torrentProcess.pid}`);
+
+            // Update process reference
+            processInfo.process = torrentProcess;
+            processInfo.status.status = 'connecting';
+
+            this.setupProcessListeners(torrentId, processInfo);
+
+            return { torrentId, status: 'started' };
+
+        } catch (error) {
+            console.error(`[TORRENT] Error starting torrent: ${error.message}`);
+            this.activeTorrents.delete(torrentId);
+            throw error;
+        }
+    }
+
+    setupProcessListeners(torrentId, processInfo) {
+        const { process: torrentProcess } = processInfo;
+
+        torrentProcess.stdout.on('data', (data) => {
+            try {
+                const output = data.toString();
+                console.log(`[TORRENT ${torrentId}] ${output.trim()}`);
+                
+                // Parse CLI output and update status
+                this.parseCliOutput(output, processInfo.status);
+                
+                // Broadcast updates to clients
+                this.broadcastUpdate(torrentId, processInfo.status);
+            } catch (error) {
+                console.error(`[TORRENT ${torrentId}] Error processing stdout:`, error);
+            }
+        });
+
+        torrentProcess.stderr.on('data', (data) => {
+            const errorOutput = data.toString();
+            console.error(`[TORRENT ${torrentId}] Error: ${errorOutput.trim()}`);
+            
+            // Only set error status for critical errors, not warnings
+            if (errorOutput.includes('Error:') && !errorOutput.includes('Warning:')) {
+                processInfo.status.status = 'error';
+                processInfo.status.error = errorOutput;
+                this.broadcastUpdate(torrentId, processInfo.status);
+            }
+        });
+
+        torrentProcess.on('close', (code, signal) => {
+            console.log(`[TORRENT ${torrentId}] Process closed: code=${code}, signal=${signal}`);
+            
+            // Handle different exit scenarios
+            if (code === 0) {
+                processInfo.status.status = 'completed';
+                processInfo.status.progress = 100;
+                processInfo.status.message = 'Download completed successfully';
+            } else if (code === 1 && (signal === 'SIGTERM' || signal === 'SIGKILL' || processInfo.status.status === 'stopping')) {
+                // Exit code 1 with stop signal is normal for stopped torrents
+                processInfo.status.status = 'stopped';
+                processInfo.status.message = 'Torrent stopped by user';
+                processInfo.status.progress = 0;
+                processInfo.status.downloadSpeed = 0;
+                processInfo.status.uploadSpeed = 0;
+                processInfo.status.peers = 0;
+            } else if (code === 1) {
+                // Exit code 1 without stop signal indicates an error
+                processInfo.status.status = 'error';
+                processInfo.status.error = `Process exited with error code: ${code}`;
+            } else {
+                processInfo.status.status = 'error';
+                processInfo.status.error = `Process exited with code ${code}`;
+            }
+
+            this.broadcastUpdate(torrentId, processInfo.status);
+            
+            // Remove from tracking after a delay for UI updates
+            setTimeout(() => {
+                this.activeTorrents.delete(torrentId);
+                console.log(`[TORRENT] Removed ${torrentId} from tracking after process exit`);
+            }, 3000);
+        });
+
+        torrentProcess.on('error', (error) => {
+            console.error(`[TORRENT ${torrentId}] Process error: ${error.message}`);
+            processInfo.status.status = 'error';
+            processInfo.status.error = error.message;
+            this.broadcastUpdate(torrentId, processInfo.status);
+        });
+    }
+
+    parseCliOutput(output, statusObject) {
+        try {
+            // Extract file name
+            const fileMatch = output.match(/Downloading:\s*(.+)/);
+            if (fileMatch) {
+                statusObject.fileName = fileMatch[1].trim();
+            }
+
+            // Extract progress
+            const progressMatch = output.match(/(\d+(?:\.\d+)?)%/);
+            if (progressMatch) {
+                statusObject.progress = parseFloat(progressMatch[1]);
+            }
+
+            // Extract speed
+            const speedMatch = output.match(/Speed:\s*([\d.]+)\s*(B|KB|MB|GB)\/s/);
+            if (speedMatch) {
+                statusObject.downloadSpeed = this.parseSpeed(speedMatch[1], speedMatch[2]);
+            }
+
+            // Extract downloaded/total
+            const downloadedMatch = output.match(/Downloaded:\s*([\d.]+)\s*(B|KB|MB|GB)\/([\d.]+)\s*(B|KB|MB|GB)/);
+            if (downloadedMatch) {
+                statusObject.downloaded = this.parseSize(downloadedMatch[1], downloadedMatch[2]);
+                statusObject.totalSize = this.parseSize(downloadedMatch[3], downloadedMatch[4]);
+            }
+
+            // Extract peers
+            const peersMatch = output.match(/Peers:\s*(\d+)/);
+            if (peersMatch) {
+                statusObject.peers = parseInt(peersMatch[1]);
+            }
+
+            // Extract streaming URL
+            const serverMatch = output.match(/Server running at:\s*(http[^\s]+)/);
+            if (serverMatch) {
+                statusObject.streamingUrl = serverMatch[1];
+                statusObject.canStream = true;
+            }
+
+            // Extract time remaining
+            const timeMatch = output.match(/Time remaining:\s*([^\n\r]+)/);
+            if (timeMatch) {
+                statusObject.timeRemaining = timeMatch[1].trim();
+            }
+
+            // Update status
+            if (output.includes('verifying')) {
+                statusObject.status = 'verifying';
+            } else if (output.includes('Downloading:') || progressMatch) {
+                statusObject.status = 'downloading';
+            } else if (output.includes('seeding')) {
+                statusObject.status = 'seeding';
+            }
+        } catch (error) {
+            console.error(`[ERROR] Failed to parse CLI output: ${error.message}`);
+        }
+    }
+
+    parseSpeed(value, unit) {
+        try {
+            if (!value || isNaN(value)) {
+                return 0;
+            }
+            
+            const num = parseFloat(value);
+            if (isNaN(num)) {
+                return 0;
+            }
+
+            const unitUpper = (unit || '').toUpperCase();
+            const units = {
+                'B': 1,
+                'KB': 1024,
+                'MB': 1024 * 1024,
+                'GB': 1024 * 1024 * 1024,
+                'KIB': 1024,
+                'MIB': 1024 * 1024,
+                'GIB': 1024 * 1024 * 1024,
+                'KB/S': 1024,
+                'MB/S': 1024 * 1024,
+                'GB/S': 1024 * 1024 * 1024
+            };
+
+            const multiplier = units[unitUpper] || 1;
+            return Math.floor(num * multiplier);
+        } catch (error) {
+            console.error(`[ERROR] Failed to parse speed: ${value} ${unit}`);
+            return 0;
+        }
+    }
+
+    parseSize(value, unit) {
+        return this.parseSpeed(value, unit); // Same logic as parseSpeed
+    }
+
+    broadcastUpdate(torrentId, statusObject) {
+        if (this.onUpdate) {
+            try {
+                this.onUpdate(torrentId, statusObject);
+            } catch (error) {
+                console.error(`[ERROR] Failed to broadcast update: ${error.message}`);
+            }
+        }
+    }
+
+    async stopTorrent(torrentId) {
+        const processInfo = this.activeTorrents.get(torrentId);
+        
+        if (!processInfo) {
+            throw new Error(`Torrent with ID ${torrentId} not found`);
+        }
+        
+        try {
+            console.log(`[TORRENT] Stopping torrent: ${torrentId}`);
+            
+            // Update status to stopping
+            processInfo.status.status = 'stopping';
+            this.broadcastUpdate(torrentId, processInfo.status);
+            
+            // Kill the process
+            if (processInfo.process && processInfo.process.pid) {
+                // Use different kill methods based on platform
+                if (this.isWindows) {
+                    try {
+                        execSync(`taskkill /pid ${processInfo.process.pid} /T /F`);
+                    } catch (error) {
+                        console.error(`[ERROR] Failed to kill process with taskkill: ${error.message}`);
+                        processInfo.process.kill('SIGKILL');
+                    }
+                } else {
+                    processInfo.process.kill('SIGTERM');
+                }
+                
+                console.log(`[TORRENT] Sent kill signal to process: ${processInfo.process.pid}`);
+                
+                return { torrentId, status: 'stopping' };
+            } else {
+                console.log(`[TORRENT] No active process found for torrent: ${torrentId}`);
+                this.activeTorrents.delete(torrentId);
+                return { torrentId, status: 'stopped' };
+            }
+        } catch (error) {
+            console.error(`[ERROR] Failed to stop torrent: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async stopAllTorrents() {
+        const stopPromises = [];
+        for (const [torrentId] of this.activeTorrents) {
+            stopPromises.push(this.stopTorrent(torrentId).catch(console.error));
+        }
+        
+        await Promise.all(stopPromises);
+        return { status: 'all_stopped' };
+    }
+
+    getTorrent(torrentId) {
+        const processInfo = this.activeTorrents.get(torrentId);
+        if (!processInfo) {
+            return null;
+        }
+        
+        return processInfo.status;
+    }
+
+    getAllTorrents() {
+        const torrents = [];
+        for (const [torrentId, processInfo] of this.activeTorrents) {
+            torrents.push(processInfo.status);
+        }
+        return torrents;
+    }
+
+    generateTorrentId() {
+        return crypto.randomBytes(8).toString('hex');
+    }
+
+    setUpdateCallback(callback) {
+        this.onUpdate = callback;
+    }
+}
+
+export default TorrentManager;
