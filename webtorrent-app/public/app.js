@@ -917,6 +917,9 @@ class WebTorrentApp {
                 return;
             }
 
+            // Save scroll position before updating
+            const scrollPosition = window.scrollY;
+            
             const torrentId = torrent.torrentId;
             const cardId = `torrent-${torrentId}`;
             let card = document.getElementById(cardId);
@@ -924,11 +927,14 @@ class WebTorrentApp {
         
             // Save expanded state before any redraw
             let wasExpanded = false;
+            let fileListScrollPosition = 0;
             if (card && !isNewCard) {
                 const fileList = card.querySelector('.file-list');
                 wasExpanded = fileList && fileList.style && fileList.style.display !== 'none';
                 if (wasExpanded) {
                     this.expandedFileLists.add(torrentId);
+                    // Save file list scroll position
+                    fileListScrollPosition = fileList.scrollTop || 0;
                 }
             }
 
@@ -1003,7 +1009,9 @@ class WebTorrentApp {
                 
                 const isHidden = fileList.style.display === 'none' || fileList.style.display === '';
                 
+                // Fully expand the file list without internal scrolling
                 fileList.style.display = isHidden ? 'block' : 'none';
+                fileList.style.maxHeight = isHidden ? 'none' : '0';
                 button.innerHTML = isHidden ? '<i class="fas fa-chevron-up"></i> Hide Files' : '<i class="fas fa-chevron-down"></i> Show Files';
                 
                 // Track expanded state
@@ -1029,6 +1037,7 @@ class WebTorrentApp {
                 const toggleBtn = card.querySelector('.toggle-files-btn');
                 if (fileList && fileList.style && toggleBtn) {
                     fileList.style.display = 'block';
+                    fileList.style.maxHeight = 'none'; // Ensure full expansion
                     toggleBtn.innerHTML = '<i class="fas fa-chevron-up"></i> Hide Files';
                 }
             }
@@ -1236,6 +1245,9 @@ class WebTorrentApp {
             console.error(`Error updating torrent ${torrent.torrentId}:`, error);
             this.addLogEntry(`Error updating torrent ${torrent.torrentId}: ${error.message}`, 'error');
         }
+        
+        // No need to restore scroll position with our new approach
+        // The page won't refresh when scrolled down
     }
     
     // Auto-refresh methods
@@ -1244,8 +1256,23 @@ class WebTorrentApp {
             clearInterval(this.refreshInterval);
         }
         
+        // Set a much longer refresh rate to prevent frequent updates
+        this.refreshRate = 30000; // 30 seconds instead of 5 seconds
+        
+        // Add a button to manually refresh instead of auto-refreshing
+        const actionBar = document.querySelector('.action-bar');
+        if (actionBar && !document.getElementById('manual-refresh-btn')) {
+            const refreshBtn = document.createElement('button');
+            refreshBtn.id = 'manual-refresh-btn';
+            refreshBtn.className = 'btn btn-primary';
+            refreshBtn.innerHTML = '<i class="fas fa-sync"></i> Refresh';
+            refreshBtn.addEventListener('click', () => this.requestTorrentUpdates());
+            actionBar.appendChild(refreshBtn);
+        }
+        
         this.refreshInterval = setInterval(() => {
-            if (this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN) {
+            // Only auto-refresh if page is not scrolled down
+            if (this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN && window.scrollY < 100) {
                 this.requestTorrentUpdates();
             }
         }, this.refreshRate);
@@ -1259,8 +1286,22 @@ class WebTorrentApp {
     }
     
     requestTorrentUpdates() {
+        // Don't update if user is actively scrolling
+        if (this.isUserScrolling) {
+            return;
+        }
+        
         if (this.torrents.size > 0) {
+            // Save current scroll position before requesting updates
+            this.lastScrollPosition = window.scrollY;
             this.sendMessage({ type: 'get-torrents' });
+        }
+    }
+    
+    // Method to restore scroll position after updates
+    restoreScrollPosition() {
+        if (this.lastScrollPosition !== undefined) {
+            window.scrollTo(0, this.lastScrollPosition);
         }
     }
     

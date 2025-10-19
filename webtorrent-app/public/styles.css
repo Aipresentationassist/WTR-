@@ -1886,8 +1886,7 @@ body {
     list-style: none;
     margin-top: var(--space-3);
     padding: 0;
-    max-height: 400px;
-    overflow-y: auto;
+    /* Removed max-height and overflow-y to make it fully expandable */
     transition: opacity 0.2s ease, max-height 0.3s ease;
 }
 
