@@ -228,6 +228,10 @@ async function handleWebSocketMessage(ws, data, clientId) {
                 await handleGetTorrents(ws, clientId);
                 break;
                 
+            case 'add-torrent':
+                await handleAddTorrent(ws, data, clientId);
+                break;
+                
             case 'start-torrent':
                 await handleStartTorrent(ws, data, clientId);
                 break;
@@ -284,6 +288,53 @@ async function handleGetTorrents(ws, clientId) {
             type: 'error',
             message: 'Failed to get torrents',
             error: error.message
+        }));
+    }
+}
+
+// Handle add-torrent message
+async function handleAddTorrent(ws, data, clientId) {
+    console.log(`[WS ${clientId}] Adding torrent`);
+    try {
+        const { magnetLink } = data;
+        
+        if (!magnetLink) {
+            throw new Error('Magnet link is required');
+        }
+        
+        // Clean and validate magnet link
+        const cleanMagnet = decodeHtmlEntities(magnetLink.trim());
+        const magnetRegex = /^magnet:\?xt=urn:btih:[a-fA-F0-9]{40}/i;
+        if (!magnetRegex.test(cleanMagnet)) {
+            throw new Error('Invalid or malformed magnet link. It must be a valid info-hash magnet link.');
+        }
+        
+        const downloadPath = CONFIG.DOWNLOADS_DIR;
+        console.log(`[WS ${clientId}] Downloading to: ${downloadPath}`);
+        
+        const result = await torrentManager.startTorrent(cleanMagnet, downloadPath, false);
+        console.log(`[WS ${clientId}] Torrent added:`, result);
+        
+        ws.send(JSON.stringify({
+            type: 'torrent-added',
+            data: result,
+            timestamp: new Date().toISOString()
+        }));
+        
+        // Broadcast to all clients
+        broadcastToClients({
+            type: 'torrent-update',
+            torrentId: result.torrentId,
+            data: torrentManager.activeTorrents.get(result.torrentId)?.status || {}
+        });
+        
+    } catch (error) {
+        console.error(`[WS ${clientId}] Error adding torrent:`, error);
+        ws.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to add torrent',
+            error: error.message,
+            timestamp: new Date().toISOString()
         }));
     }
 }
@@ -623,7 +674,11 @@ app.get('/api/torrents/:torrentId/files/:fileIndex/stream-url', (req, res) => {
             return res.status(404).json({ error: 'File not found' });
         }
         
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        // Get the host from X-Forwarded-Host header (for ngrok/VPS) or fallback to original host
+        const host = req.headers['x-forwarded-host'] || req.get('host');
+        // Get protocol from X-Forwarded-Proto header (for ngrok/VPS) or fallback to original protocol
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const baseUrl = `${protocol}://${host}`;
         const streamUrl = `${baseUrl}/stream/${torrentId}/${fileIndex}`;
         
         res.json({
