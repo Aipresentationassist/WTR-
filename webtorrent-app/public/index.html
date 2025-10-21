@@ -8,16 +8,21 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="app-container">
         <!-- Header -->
         <header class="app-header">
             <div class="header-left">
-                <h1><i class="fas fa-folder-open"></i> TorrentStream</h1>
+                <div class="logo-section">
+                    <div class="logo-icon">
+                        <i class="fas fa-cloud-download-alt"></i>
+                    </div>
+                    <h1>TorrentStream</h1>
+                </div>
             </div>
-            <div class="header-actions">
+            <div class="header-right">
                 <div class="stats-panel">
                     <div class="stat-item">
                         <i class="fas fa-arrow-down"></i>
@@ -39,12 +44,16 @@
         <main class="app-main">
             <!-- Add Torrent Section -->
             <section class="add-torrent-section">
+                <div class="section-title">
+                    <i class="fas fa-plus-circle"></i>
+                    <h2>Add Torrent</h2>
+                </div>
                 <div class="input-group">
                     <div class="input-wrapper">
                         <i class="fas fa-magnet input-icon"></i>
-                        <input type="text" id="magnet-input" placeholder="Paste Magnet Link Here" />
+                        <input type="text" id="magnet-input" placeholder="Paste magnet link here..." />
                     </div>
-                    <button id="start-download-btn" class="btn btn-primary">
+                    <button id="start-download-btn" class="btn btn-primary btn-lg">
                         <i class="fas fa-plus"></i> Add Torrent
                     </button>
                 </div>
@@ -53,17 +62,19 @@
             <!-- Torrents Section -->
             <section class="torrents-section">
                 <div class="section-header">
-                    <h2>Active Torrents</h2>
-                    <div class="section-actions">
-                        <button id="refresh-btn" class="btn btn-small btn-info">
-                            <i class="fas fa-sync"></i> Refresh
-                        </button>
+                    <div class="section-title">
+                        <i class="fas fa-list"></i>
+                        <h2>Active Torrents</h2>
                     </div>
+                    <button id="refresh-btn" class="btn btn-secondary btn-sm">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
                 </div>
                 <div id="torrents-container" class="torrents-container">
                     <div class="no-torrents" id="no-torrents">
-                        <i class="fas fa-inbox fa-2x"></i>
-                        <p>No active torrents. Add a magnet link to get started.</p>
+                        <i class="fas fa-inbox"></i>
+                        <p>No active torrents</p>
+                        <span>Add a magnet link to get started</span>
                     </div>
                 </div>
             </section>
@@ -71,12 +82,15 @@
             <!-- Logs Section -->
             <section class="logs-section">
                 <div class="logs-header">
-                    <h2><i class="fas fa-terminal"></i> Console</h2>
+                    <div class="section-title">
+                        <i class="fas fa-terminal"></i>
+                        <h2>Console</h2>
+                    </div>
                     <div class="logs-controls">
-                        <button id="clear-logs-btn" class="btn btn-small">
+                        <button id="clear-logs-btn" class="btn btn-secondary btn-sm">
                             <i class="fas fa-trash"></i> Clear
                         </button>
-                        <button id="toggle-logs-btn" class="btn btn-small">
+                        <button id="toggle-logs-btn" class="btn btn-secondary btn-sm">
                             <i class="fas fa-chevron-down"></i> Hide
                         </button>
                     </div>
@@ -89,10 +103,8 @@
         
         <!-- Footer -->
         <footer class="app-footer">
-            <div class="footer-content">
-                <p>Powered by <a href="https://webtorrent.io/" target="_blank">WebTorrent</a></p>
-                <p class="version">v1.0.0</p>
-            </div>
+            <p>Powered by <a href="https://webtorrent.io/" target="_blank">WebTorrent</a></p>
+            <p class="version">v1.0.0</p>
         </footer>
     </div>
 
